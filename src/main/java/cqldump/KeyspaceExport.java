@@ -119,8 +119,9 @@ public class KeyspaceExport extends HttpServlet {
                 try (Session hsession = cluster.connect(keyspaceName)) {
                     ze = new ZipEntry(keyspaceName + "/" + tmd.getName() + ".json");
                     zout.putNextEntry(ze);
+                    String tableName = tmd.getName();
                     // content is a series of JSON objects with a 32 bit hex prefix indicating text size of record JSON                    
-                    Statement stmt = new SimpleStatement("SELECT * FROM " + tmd.getName());
+                    Statement stmt = new SimpleStatement("SELECT * FROM " + tableName);
                     log.info("fetching records from " + tmd.getName());
                     stmt.setFetchSize(1000);
                     ResultSet rs = hsession.execute(stmt);
@@ -129,27 +130,29 @@ public class KeyspaceExport extends HttpServlet {
                     while(iter.hasNext()) {
                         Row row = iter.next();                        
                         JSONObject rowObject = new JSONObject();
+                        JSONObject rowData = new JSONObject();
                         for (Definition key : row.getColumnDefinitions().asList()) {
                             Object o = row.getObject(key.getName());
                             if(o == null) {
-                                rowObject.put(key.getName(), null);
+                                rowData.put(key.getName(), null);
                             } else if(key.getType() == DataType.timeuuid()) {
                                 UUID uuid = (UUID) o;
                                 String txt = uuid.toString();
-                                rowObject.put(key.getName(), txt);
+                                rowData.put(key.getName(), txt);
                             } else if(key.getType() == DataType.uuid()) {
                                 UUID uuid = (UUID) o;
                                 String txt = uuid.toString();
-                                rowObject.put(key.getName(), txt);
+                                rowData.put(key.getName(), txt);
                             } else if(key.getType() == DataType.timestamp()) {
                                 SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
                                 String text = fmt.format(row.getTimestamp(key.getName()));
-                                rowObject.put(key.getName(), text);
+                                rowData.put(key.getName(), text);
                             } else {
-                                rowObject.put(key.getName(), o.toString());
-                            }
-                            
+                                rowData.put(key.getName(), o.toString());
+                            }                            
                         }
+                        rowObject.put("data", rowData);
+                        rowObject.put("table_name", tableName);
                         byte[] textData = rowObject.toJSONString().getBytes();
                         String sizeHex = String.format("\r\n%8s", Integer.toHexString(textData.length));
                         zout.write(sizeHex.getBytes());

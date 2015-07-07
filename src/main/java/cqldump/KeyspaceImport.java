@@ -12,8 +12,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.servlet.ServletContext;
@@ -183,14 +185,14 @@ public class KeyspaceImport extends HttpServlet {
             // process metadata
             cluster = getCluster(hostName, portNumber, keyspaceName, replicationFactor);
             // read into JSON block
-            loadMetadata(zin, cluster, keyspaceName);
+            Map<String, TableMetadata> tableMetadata = loadMetadata(zin, cluster, keyspaceName);
             // process entries
             do {
                 zipEntry = zin.getNextEntry();
                 if (zipEntry != null) {
                     entryName = zipEntry.getName();
-                    log.debug("processing entry " + entryName);
-                    loadTableData(zin, cluster);
+                    log.debug("processing entry " + entryName);                    
+                    loadTableData(zin, cluster, keyspaceName, tableMetadata);
                 }
             } while (zipEntry != null);
         }
@@ -224,8 +226,26 @@ public class KeyspaceImport extends HttpServlet {
         return cluster;
     }
 
-    private void loadMetadata(ZipInputStream zin, Cluster cluster, String keyspaceName) throws IOException {
+    protected class TableMetadata {
+        private final String tableName;
+        private final Map<String, String> columns = new HashMap<>();
 
+        public TableMetadata(String tableName) {
+            this.tableName = tableName;
+        }
+
+        public String getTableName() {
+            return tableName;
+        }
+
+        public Map<String, String> getColumns() {
+            return columns;
+        }
+
+    }
+
+    private Map<String, TableMetadata> loadMetadata(ZipInputStream zin, Cluster cluster, String keyspaceName) throws IOException {
+        Map<String, TableMetadata> typeMap = new HashMap<>();
         String sourceJson = getJSONData(zin);
         JSONObject source = (JSONObject) JSONValue.parse(sourceJson);
         String originalKeyspace = (String) source.get("keyspace");
@@ -236,6 +256,8 @@ public class KeyspaceImport extends HttpServlet {
             JSONObject table = (JSONObject) tableIter.next();
             String tableName = (String) table.get("name");
             String createText = (String) table.get("create");
+            TableMetadata metadata = new TableMetadata(tableName);
+            typeMap.put(tableName, metadata);
             // search and replace new keyspace name
             createText = createText.replaceAll(originalKeyspace, keyspaceName);
             log.debug("create table " + tableName + " create:" + createText);
@@ -247,6 +269,9 @@ public class KeyspaceImport extends HttpServlet {
                 if (columns != null) {
                     for (Iterator it = columns.iterator(); it.hasNext();) {
                         JSONObject column = (JSONObject) it.next();
+                        String name = (String) column.get("name");
+                        String colType = (String) column.get("type");
+                        metadata.getColumns().put(name, colType);
                         String createIndexText = (String) column.get("create_index");
                         if (createIndexText != null) {
                             createIndexText = createIndexText.replaceAll(originalKeyspace, keyspaceName);
@@ -257,6 +282,7 @@ public class KeyspaceImport extends HttpServlet {
                 }
             }
         }
+        return typeMap;
     }
 
     private static final int BUFFER_SIZE = 32768;
@@ -316,23 +342,70 @@ public class KeyspaceImport extends HttpServlet {
         return jsonData;
     }
 
-    private void loadTableData(ZipInputStream zin, Cluster cluster) throws IOException {
+    private void loadTableData(ZipInputStream zin, Cluster cluster, String keyspaceName, Map<String, TableMetadata> tableMetadata) throws IOException {
         // table data is a series of records.
         // 8 bytes of text representing a hex length
         // that length is how long the JSON is for the record data.
         // skip the first two chars
-        String tableData;
-        int c = 0;
-        do {
-            tableData = getTableJSONData(zin);
-            if (tableData != null) {
-                log.debug(c + " row data:" + tableData);
-                JSONObject record = (JSONObject) JSONValue.parse(tableData);
-                log.debug("record: " + record);
-                c++;
-            }
-        } while (tableData != null);
-        log.debug(" -- table import complete imported " + c + " tables");
+        try (Session csession = cluster.connect(keyspaceName)) {
+            String tableData;
+            int c = 0;
+            do {
+                tableData = getTableJSONData(zin);
+                if (tableData != null) {
+                    log.debug(c + " row data:" + tableData);
+                    JSONObject record = (JSONObject) JSONValue.parse(tableData);
+                    String tableName = (String) record.get("table_name");
+                    TableMetadata metadata = tableMetadata.get(tableName);
+                    JSONObject rowData = (JSONObject) record.get("data");
+                    log.debug("import table " + tableName);
+                    log.debug("record: " + record);
+                    // series of values
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("INSERT INTO ");
+                    sb.append(tableName);
+                    sb.append(" (");
+                    int i=0;
+                    for (Iterator it = rowData.keySet().iterator(); it.hasNext();) {
+                        String colName = (String) it.next();
+                        if(i != 0) {
+                            sb.append(',');
+                        }
+                        sb.append(colName);
+                        i++;
+                    }
+                    sb.append(") VALUES (");
+                    i = 0;
+                    for (Iterator it = rowData.keySet().iterator(); it.hasNext();) {
+                        String colName = (String) it.next();
+                        String dataValue = (String) rowData.get(colName);
+                        if(i != 0) {
+                            sb.append(',');
+                        }
+                        String colType = metadata.getColumns().get(colName);
+                        switch(colType) {
+                            case "int":
+                            case "timeuuid":
+                            case "uuid":
+                                sb.append(dataValue);
+                                break;
+                            default:
+                                sb.append("'");
+                                sb.append(dataValue);
+                                sb.append("'");
+                                break;
+                        }
+                        i++;
+                    }
+                    sb.append(");");
+                    String insertStatementText = sb.toString();
+                    log.debug(insertStatementText);
+                    csession.execute(insertStatementText);
+                    c++;
+                }
+            } while (tableData != null);
+            log.debug(" -- table import complete imported " + c + " tables");
+        }
     }
-
 }
+

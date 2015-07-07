@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Import/Export</title>
+    <title>CQL Import/Export</title>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   </head>
   <body>
     <h3>Export</h3>
     <form action="export" method="POST">
       Host address<br/>
-      <input type="text" name="host"><br/>
+      <input type="text" name="host" value="localhost"><br/>
       <br/>
       Host port<br/>
-      <input type="text" name="port"><br/>
+      <input type="text" name="port" value="9042"><br/>
       <br/>
       Keyspace name<br/>
       <input type="text" name="keyspace"><br/>
@@ -22,10 +22,10 @@
     <h3>Import</h3>
     <form action="import" method="POST" enctype="multipart/form-data">
       Host address<br/>
-      <input type="text" name="host"><br/>
+      <input type="text" name="host" value="localhost"><br/>
       <br/>
       Host port<br/>
-      <input type="text" name="port"><br/>
+      <input type="text" name="port" value="9042"><br/>
       <br/>
       Keyspace name<br/>
       <input type="text" name="keyspace"><br/>

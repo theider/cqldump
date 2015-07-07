@@ -116,7 +116,7 @@ public class KeyspaceExport extends HttpServlet {
             // next query all records in each table
             for (TableMetadata tmd : md.getTables()) {
                 log.info("export table " + tmd.getName());
-                try (Session hsession = cluster.connect("realise")) {
+                try (Session hsession = cluster.connect(keyspaceName)) {
                     ze = new ZipEntry(keyspaceName + "/" + tmd.getName() + ".json");
                     zout.putNextEntry(ze);
                     // content is a series of JSON objects with a 32 bit hex prefix indicating text size of record JSON                    
@@ -143,7 +143,7 @@ public class KeyspaceExport extends HttpServlet {
                                 rowObject.put(key.getName(), txt);
                             } else if(key.getType() == DataType.timestamp()) {
                                 SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
-                                String text = fmt.format(row.getDate(key.getName()));
+                                String text = fmt.format(row.getTimestamp(key.getName()));
                                 rowObject.put(key.getName(), text);
                             } else {
                                 rowObject.put(key.getName(), o.toString());

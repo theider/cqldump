@@ -174,7 +174,7 @@ public class KeyspaceImport extends HttpServlet {
         log.debug("pass one");
         Cluster cluster;
         ZipEntry zipEntry = zin.getNextEntry();
-        if(zipEntry != null) {
+        if (zipEntry != null) {
             String entryName = zipEntry.getName();
             log.debug("processing entry " + entryName);
             if (!entryName.endsWith("metadata.json")) {
@@ -183,7 +183,7 @@ public class KeyspaceImport extends HttpServlet {
             // process metadata
             cluster = getCluster(hostName, portNumber, keyspaceName, replicationFactor);
             // read into JSON block
-            loadMetadata(zin, cluster, keyspaceName);        
+            loadMetadata(zin, cluster, keyspaceName);
             // process entries
             do {
                 zipEntry = zin.getNextEntry();
@@ -212,9 +212,9 @@ public class KeyspaceImport extends HttpServlet {
         Metadata metadata = cluster.getMetadata();
         log.info("Connected to Cassandra cluster: " + metadata.getClusterName());
         KeyspaceMetadata keyspace = metadata.getKeyspace(keyspaceName);
-        if(keyspace == null) {
+        if (keyspace == null) {
             // create default keyspace
-            try(Session csession = cluster.connect()) {
+            try (Session csession = cluster.connect()) {
                 // create keyspace
                 String keyspaceCreate = "CREATE KEYSPACE " + keyspaceName + " WITH replication = {'class':'SimpleStrategy', 'replication_factor':" + Integer.toString(replicationFactor) + "};";
                 csession.execute(keyspaceCreate);
@@ -225,30 +225,30 @@ public class KeyspaceImport extends HttpServlet {
     }
 
     private void loadMetadata(ZipInputStream zin, Cluster cluster, String keyspaceName) throws IOException {
-        
-        String sourceJson = getJSONData(zin);        
+
+        String sourceJson = getJSONData(zin);
         JSONObject source = (JSONObject) JSONValue.parse(sourceJson);
         String originalKeyspace = (String) source.get("keyspace");
         log.debug("original keyspace name " + originalKeyspace);
 
         JSONArray tables = (JSONArray) source.get("tables");
-        for(Iterator tableIter = tables.iterator(); tableIter.hasNext();) {
+        for (Iterator tableIter = tables.iterator(); tableIter.hasNext();) {
             JSONObject table = (JSONObject) tableIter.next();
             String tableName = (String) table.get("name");
             String createText = (String) table.get("create");
             // search and replace new keyspace name
             createText = createText.replaceAll(originalKeyspace, keyspaceName);
             log.debug("create table " + tableName + " create:" + createText);
-            try(Session csession = cluster.connect()) {
+            try (Session csession = cluster.connect()) {
                 // create keyspace
-                csession.execute(createText);            
+                csession.execute(createText);
                 // for each table create the indices
                 JSONArray columns = (JSONArray) table.get("columns");
-                if(columns != null) {
+                if (columns != null) {
                     for (Iterator it = columns.iterator(); it.hasNext();) {
                         JSONObject column = (JSONObject) it.next();
                         String createIndexText = (String) column.get("create_index");
-                        if(createIndexText != null) {
+                        if (createIndexText != null) {
                             createIndexText = createIndexText.replaceAll(originalKeyspace, keyspaceName);
                             log.debug(" -- create index " + createIndexText);
                             csession.execute(createIndexText);
@@ -266,10 +266,10 @@ public class KeyspaceImport extends HttpServlet {
         int r;
         int dataLength;
         r = zin.read(newline, 0, 2);
-        if(r == 2) {
+        if (r == 2) {
             byte[] hexBuf = new byte[8];
             r = zin.read(hexBuf, 0, 8);
-            if(r == 8) {
+            if (r == 8) {
                 String hexText = new String(hexBuf);
                 log.debug("[" + hexText + "]");
                 hexText = hexText.trim();
@@ -282,22 +282,21 @@ public class KeyspaceImport extends HttpServlet {
             return null;
         }
 
-
         byte[] buffer = new byte[BUFFER_SIZE];
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         do {
             r = BUFFER_SIZE;
-            if(r > dataLength) {
+            if (r > dataLength) {
                 r = dataLength;
             }
             r = zin.read(buffer, 0, r);
-            if(r > 0) {
+            if (r > 0) {
                 bout.write(buffer, 0, r);
                 dataLength -= r;
             } else {
                 dataLength = 0;
             }
-        } while(dataLength > 0);
+        } while (dataLength > 0);
 
         String jsonData = new String(bout.toByteArray());
         return jsonData;
@@ -309,10 +308,10 @@ public class KeyspaceImport extends HttpServlet {
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         do {
             r = zin.read(buffer, 0, BUFFER_SIZE);
-            if(r > 0) {
+            if (r > 0) {
                 bout.write(buffer, 0, r);
             }
-        } while(r > 0);
+        } while (r > 0);
         String jsonData = new String(bout.toByteArray());
         return jsonData;
     }
@@ -326,12 +325,14 @@ public class KeyspaceImport extends HttpServlet {
         int c = 0;
         do {
             tableData = getTableJSONData(zin);
-            if(tableData != null) {
+            if (tableData != null) {
                 log.debug(c + " row data:" + tableData);
+                JSONObject record = (JSONObject) JSONValue.parse(tableData);
+                log.debug("record: " + record);
                 c++;
             }
-        } while(tableData != null);
-        log.debug(" -- table import complete");
+        } while (tableData != null);
+        log.debug(" -- table import complete imported " + c + " tables");
     }
 
 }

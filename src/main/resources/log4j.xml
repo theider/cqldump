@@ -7,7 +7,7 @@
         </layout>
     </appender>
     <logger name="cqldump">
-        <level value="DEBUG" />
+        <level value="INFO" />
     </logger>
     <root>
         <priority value="warn"></priority>

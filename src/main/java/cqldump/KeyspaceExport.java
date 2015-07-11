@@ -17,6 +17,7 @@ import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.DefaultRetryPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Iterator;
 import java.util.UUID;
@@ -26,6 +27,7 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import org.apache.commons.codec.binary.Base64;
 import org.apache.log4j.Logger;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -143,6 +145,11 @@ public class KeyspaceExport extends HttpServlet {
                                 UUID uuid = (UUID) o;
                                 String txt = uuid.toString();
                                 rowData.put(key.getName(), txt);
+                            } else if(key.getType() == DataType.blob()) {
+                                ByteBuffer buffer = (ByteBuffer) o;
+                                byte[] blobData = buffer.array();
+                                String blobBase64 = Base64.encodeBase64String(blobData);
+                                rowData.put(key.getName(), blobBase64);
                             } else if(key.getType() == DataType.timestamp()) {
                                 SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
                                 String text = fmt.format(row.getTimestamp(key.getName()));

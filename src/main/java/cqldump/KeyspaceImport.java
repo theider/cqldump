@@ -1,8 +1,10 @@
 package cqldump;
 
+import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.KeyspaceMetadata;
 import com.datastax.driver.core.Metadata;
+import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.DefaultRetryPolicy;
@@ -12,10 +14,17 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.logging.Level;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.servlet.ServletContext;
@@ -23,6 +32,7 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.fileupload.disk.DiskFileItemFactory;
 import org.apache.commons.fileupload.servlet.ServletFileUpload;
@@ -170,10 +180,8 @@ public class KeyspaceImport extends HttpServlet {
     }// </editor-fold>
 
     private void importKeyspace(InputStream inputStream, String hostName, int portNumber, String keyspaceName, int replicationFactor) throws IOException {
-
         ZipInputStream zin = new ZipInputStream(inputStream);
         // find metadata entry
-        log.debug("pass one");
         Cluster cluster;
         ZipEntry zipEntry = zin.getNextEntry();
         if (zipEntry != null) {
@@ -187,14 +195,17 @@ public class KeyspaceImport extends HttpServlet {
             // read into JSON block
             Map<String, TableMetadata> tableMetadata = loadMetadata(zin, cluster, keyspaceName);
             // process entries
+            int t = 0;
             do {
                 zipEntry = zin.getNextEntry();
                 if (zipEntry != null) {
                     entryName = zipEntry.getName();
                     log.debug("processing entry " + entryName);                    
                     loadTableData(zin, cluster, keyspaceName, tableMetadata);
+                    t++;
                 }
             } while (zipEntry != null);
+            log.info(" - completed import of keyspace " + keyspaceName + " imported " + t + " tables.");
         }
     }
 
@@ -245,6 +256,7 @@ public class KeyspaceImport extends HttpServlet {
     }
 
     private Map<String, TableMetadata> loadMetadata(ZipInputStream zin, Cluster cluster, String keyspaceName) throws IOException {
+        log.info("importing metadata keyspace " + keyspaceName);
         Map<String, TableMetadata> typeMap = new HashMap<>();
         String sourceJson = getJSONData(zin);
         JSONObject source = (JSONObject) JSONValue.parse(sourceJson);
@@ -260,7 +272,7 @@ public class KeyspaceImport extends HttpServlet {
             typeMap.put(tableName, metadata);
             // search and replace new keyspace name
             createText = createText.replaceAll(originalKeyspace, keyspaceName);
-            log.debug("create table " + tableName + " create:" + createText);
+            log.info("create table " + tableName + " create:" + createText);
             try (Session csession = cluster.connect()) {
                 // create keyspace
                 csession.execute(createText);
@@ -287,45 +299,48 @@ public class KeyspaceImport extends HttpServlet {
 
     private static final int BUFFER_SIZE = 32768;
 
-    private String getTableJSONData(ZipInputStream zin) throws IOException {
-        byte[] newline = new byte[2];
+    private byte[] getStreamBytes(InputStream in, int byteCount) throws IOException {
+        byte[] buffer = new byte[BUFFER_SIZE];
+        int bytesRead = 0;
+        ByteArrayOutputStream bout = new ByteArrayOutputStream();
         int r;
-        int dataLength;
-        r = zin.read(newline, 0, 2);
-        if (r == 2) {
-            byte[] hexBuf = new byte[8];
-            r = zin.read(hexBuf, 0, 8);
-            if (r == 8) {
+        do {
+            r = BUFFER_SIZE;
+            if (r > byteCount) {
+                r = byteCount;
+            }
+            int c = in.read(buffer, 0, r);
+            if (c > 0) {
+                bout.write(buffer, 0, c);
+                byteCount -= c;
+                bytesRead += c;
+            } else if(bytesRead != 0) {
+                throw new IOException("incomplete stream read expected " + r + " but got " + c + " bytes");
+            } else {
+                return null;
+            }
+        } while (byteCount > 0);
+        return bout.toByteArray();
+    }
+
+    private String getJSONRowData(ZipInputStream zin) throws IOException {
+        byte[] newline = getStreamBytes(zin, 2);
+        if ((newline != null) && (newline.length == 2)) {
+            byte[] hexBuf = getStreamBytes(zin, 8);
+            if (hexBuf.length == 8) {
                 String hexText = new String(hexBuf);
                 log.debug("[" + hexText + "]");
                 hexText = hexText.trim();
-                dataLength = Integer.parseInt(hexText, 16);
+                int dataLength = Integer.parseInt(hexText, 16);
                 log.debug("record len:" + dataLength);
+                byte[] data = getStreamBytes(zin, dataLength);
+                return new String(data);
             } else {
                 return null;
             }
         } else {
             return null;
         }
-
-        byte[] buffer = new byte[BUFFER_SIZE];
-        ByteArrayOutputStream bout = new ByteArrayOutputStream();
-        do {
-            r = BUFFER_SIZE;
-            if (r > dataLength) {
-                r = dataLength;
-            }
-            r = zin.read(buffer, 0, r);
-            if (r > 0) {
-                bout.write(buffer, 0, r);
-                dataLength -= r;
-            } else {
-                dataLength = 0;
-            }
-        } while (dataLength > 0);
-
-        String jsonData = new String(bout.toByteArray());
-        return jsonData;
     }
 
     private String getJSONData(ZipInputStream zin) throws IOException {
@@ -351,14 +366,19 @@ public class KeyspaceImport extends HttpServlet {
             String tableData;
             int c = 0;
             do {
-                tableData = getTableJSONData(zin);
-                if (tableData != null) {
-                    log.debug(c + " row data:" + tableData);
+                tableData = getJSONRowData(zin);
+                if (tableData != null) {                    
+                    log.debug(c + " row data:" + tableData);                    
                     JSONObject record = (JSONObject) JSONValue.parse(tableData);
                     String tableName = (String) record.get("table_name");
+                    if(c == 0) {
+                        log.info("importing table data " + keyspaceName + ":" + tableName);
+                    } else if((c % 1000) == 0) {
+                        log.info(" ... imported " + c + " rows");
+                    }
+                    
                     TableMetadata metadata = tableMetadata.get(tableName);
-                    JSONObject rowData = (JSONObject) record.get("data");
-                    log.debug("import table " + tableName);
+                    JSONObject rowData = (JSONObject) record.get("data");                    
                     log.debug("record: " + record);
                     // series of values
                     StringBuilder sb = new StringBuilder();
@@ -374,37 +394,73 @@ public class KeyspaceImport extends HttpServlet {
                         sb.append(colName);
                         i++;
                     }
+                    int columnCount = rowData.size();
                     sb.append(") VALUES (");
+                    for(i=0; i < columnCount;i++) {
+                        if(i != 0) {
+                            sb.append(',');
+                        }
+                        sb.append('?');
+                    }
+                    sb.append(");");
+                    PreparedStatement prepStmt = csession.prepare(sb.toString());
+                    List<Object> columnData = new ArrayList<>();
                     i = 0;
                     for (Iterator it = rowData.keySet().iterator(); it.hasNext();) {
                         String colName = (String) it.next();
                         String dataValue = (String) rowData.get(colName);
-                        if(i != 0) {
-                            sb.append(',');
-                        }
-                        String colType = metadata.getColumns().get(colName);
-                        switch(colType) {
-                            case "int":
-                            case "timeuuid":
-                            case "uuid":
-                                sb.append(dataValue);
-                                break;
-                            default:
-                                sb.append("'");
-                                sb.append(dataValue);
-                                sb.append("'");
-                                break;
+                        if(dataValue == null) {
+                            columnData.add(null);
+                        } else {
+                            String colType = metadata.getColumns().get(colName);
+                            switch(colType) {
+                                case "timestamp":
+                                    SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
+                                    Date d = fmt.parse(dataValue);
+                                    columnData.add(d);
+                                    break;
+                                case "blob":
+                                    byte[] blobData = Base64.decodeBase64(dataValue);
+                                    ByteBuffer buffer = ByteBuffer.wrap(blobData);
+                                    columnData.add(buffer);
+                                    break;
+                                case "double":
+                                    Double dv = Double.parseDouble(dataValue);
+                                    columnData.add(dv);
+                                    break;
+                                case "bigint":
+                                    Long ln = Long.parseLong(dataValue);
+                                    columnData.add(ln);
+                                    break;
+                                case "boolean":
+                                    Boolean bv = Boolean.parseBoolean(dataValue);
+                                    columnData.add(bv);
+                                    break;
+                                case "int":
+                                    Integer n = Integer.parseInt(dataValue);
+                                    columnData.add(n);
+                                    break;
+                                case "timeuuid":
+                                case "uuid":
+                                    columnData.add(UUID.fromString(dataValue));
+                                    break;
+                                default:
+                                    columnData.add(dataValue);
+                                    break;
+                            }
                         }
                         i++;
-                    }
-                    sb.append(");");
-                    String insertStatementText = sb.toString();
-                    log.debug(insertStatementText);
-                    csession.execute(insertStatementText);
+                    }                                                            
+                    BoundStatement bprep = new BoundStatement(prepStmt);
+                    Object[] dataValues = columnData.toArray();
+                    bprep.bind(dataValues);
+                    csession.execute(bprep);
                     c++;
                 }
             } while (tableData != null);
-            log.debug(" -- table import complete imported " + c + " tables");
+            log.info(" -- table import complete imported " + c + " tables");
+        } catch (ParseException ex) {
+            throw new IOException("failed to load data",ex);
         }
     }
 }

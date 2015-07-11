@@ -19,7 +19,9 @@ import com.datastax.driver.core.policies.TokenAwarePolicy;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Iterator;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -124,7 +126,7 @@ public class KeyspaceExport extends HttpServlet {
                     String tableName = tmd.getName();
                     // content is a series of JSON objects with a 32 bit hex prefix indicating text size of record JSON                    
                     Statement stmt = new SimpleStatement("SELECT * FROM " + tableName);
-                    log.info("fetching records from " + tmd.getName());
+                    log.info("exporting records from " + tableName);
                     stmt.setFetchSize(1000);
                     ResultSet rs = hsession.execute(stmt);
                     Iterator<Row> iter = rs.iterator();
@@ -151,8 +153,10 @@ public class KeyspaceExport extends HttpServlet {
                                 String blobBase64 = Base64.encodeBase64String(blobData);
                                 rowData.put(key.getName(), blobBase64);
                             } else if(key.getType() == DataType.timestamp()) {
-                                SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
-                                String text = fmt.format(row.getTimestamp(key.getName()));
+                                SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+                                fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+                                Date t = row.getTimestamp(key.getName());                                
+                                String text = fmt.format(t);
                                 rowData.put(key.getName(), text);
                             } else {
                                 rowData.put(key.getName(), o.toString());
@@ -164,9 +168,12 @@ public class KeyspaceExport extends HttpServlet {
                         String sizeHex = String.format("\r\n%8s", Integer.toHexString(textData.length));
                         zout.write(sizeHex.getBytes());
                         zout.write(textData);
+                        if((c % 1000) == 0) {
+                            log.info(" ... exported " + c + " rows");
+                        }
                         c++;
                     }
-                    log.info(" -- read " + c + " records");
+                    log.info(" -- exported " + c + " records from table " + tableName);
                 }
             }
 

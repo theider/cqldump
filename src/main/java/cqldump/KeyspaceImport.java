@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.zip.ZipEntry;
@@ -415,7 +416,8 @@ public class KeyspaceImport extends HttpServlet {
                             String colType = metadata.getColumns().get(colName);
                             switch(colType) {
                                 case "timestamp":
-                                    SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
+                                    SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+                                    fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
                                     Date d = fmt.parse(dataValue);
                                     columnData.add(d);
                                     break;
@@ -458,7 +460,7 @@ public class KeyspaceImport extends HttpServlet {
                     c++;
                 }
             } while (tableData != null);
-            log.info(" -- table import complete imported " + c + " tables");
+            log.info(" -- table import complete imported " + c + " rows");
         } catch (ParseException ex) {
             throw new IOException("failed to load data",ex);
         }

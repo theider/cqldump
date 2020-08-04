@@ -70,8 +70,6 @@ public class KeyspaceExport extends HttpServlet {
                 //.addContactPoint(config.getCassandraHostAddress())
                 .addContactPoint(hostAddress)
                 .withRetryPolicy(DefaultRetryPolicy.INSTANCE)
-                .withLoadBalancingPolicy(
-                        new TokenAwarePolicy(new DCAwareRoundRobinPolicy()))
                 // port
                 .withPort(portNumber)
                 .build();
@@ -104,9 +102,6 @@ public class KeyspaceExport extends HttpServlet {
                     columnObject.put("name", cmd.getName());
                     String colName = cmd.getType().getName().toString();
                     columnObject.put("type", colName);
-                    if (cmd.getIndex() != null) {
-                        columnObject.put("create_index", cmd.getIndex().asCQLQuery());
-                    }
                     columnsArray.add(columnObject);
                 }
                 tableObject.put("columns", columnsArray);

@@ -6,9 +6,7 @@ import com.datastax.driver.core.KeyspaceMetadata;
 import com.datastax.driver.core.Metadata;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
-import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.DefaultRetryPolicy;
-import com.datastax.driver.core.policies.TokenAwarePolicy;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -25,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
-import java.util.logging.Level;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.servlet.ServletContext;
@@ -217,8 +214,6 @@ public class KeyspaceImport extends HttpServlet {
                 //.addContactPoint(config.getCassandraHostAddress())
                 .addContactPoint(hostName)
                 .withRetryPolicy(DefaultRetryPolicy.INSTANCE)
-                .withLoadBalancingPolicy(
-                        new TokenAwarePolicy(new DCAwareRoundRobinPolicy()))
                 // port
                 .withPort(portNumber)
                 .build();
@@ -275,8 +270,8 @@ public class KeyspaceImport extends HttpServlet {
             createText = createText.replaceAll(originalKeyspace, keyspaceName);
             log.info("create table " + tableName + " create:" + createText);
             try (Session csession = cluster.connect()) {
-                // create keyspace
-                csession.execute(createText);
+                // create keyspace                
+                //csession.execute(createText);
                 // for each table create the indices
                 JSONArray columns = (JSONArray) table.get("columns");
                 if (columns != null) {
@@ -289,7 +284,7 @@ public class KeyspaceImport extends HttpServlet {
                         if (createIndexText != null) {
                             createIndexText = createIndexText.replaceAll(originalKeyspace, keyspaceName);
                             log.debug(" -- create index " + createIndexText);
-                            csession.execute(createIndexText);
+                            //csession.execute(createIndexText);
                         }
                     }
                 }
